@@ -3,16 +3,29 @@
 #include "RF24.h"
 #include "printf.h"
 
-int relay = 8;
+/*
+ * Use remote command to send message to arduino (use sudo!)
+ * Message should be in this format: [id pin number][action to do]
+ * We've set relay at pin 8 and actions are:
+ * 0: turn off
+ * 1: turn on
+ * 2: get the actual state
+*/
+
+int PIN_LIGHTS = 8;
+int PIN_WATER_ENGINE = 7;
+int PIN_MAIN_DOOR = 6;
 
 // Set up nRF24L01 radio on SPI bus plus pins 9 & 10 
-RF24 radio(9,10);
+RF24 radio(9, 10);
 
 // Radio pipe addresses for the 2 nodes to communicate.
+//                            this device      receptor
 const uint64_t pipes[2] = { 0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL };
 
 char * convertNumberIntoArray(unsigned short number, unsigned short length) {
-  char * arr = (char *) malloc(length * sizeof(char)), * curr = arr;
+  char * arr = (char *) malloc(length * sizeof(char)),
+       * curr = arr;
   do {
     *curr++ = number % 10;
     number /= 10;
@@ -20,22 +33,25 @@ char * convertNumberIntoArray(unsigned short number, unsigned short length) {
   return arr;
 }
 
+/**
+ * Extract the PIN from the raw message.
+ */
 unsigned short getId(char * rawMessage, unsigned short length) {
   unsigned short i = 0;
   unsigned short id = 0;
-  for ( i=1; i< length; i++) {
-    id += rawMessage[i]*pow( 10, i-1 );
+  for (i=1; i< length; i++) {
+    id += rawMessage[i] * pow(10, i - 1);
   }
   return id;
 }
 
-unsigned short getMessage( char * rawMessage) {
+unsigned short getMessage(char * rawMessage) {
   unsigned short message = rawMessage[0];
-  return (unsigned short)message;
+  return (unsigned short) message;
 }
 
 unsigned short getLength( unsigned int rudeMessage) {
-  unsigned short length = (unsigned short)(log10((float)rudeMessage)) + 1;
+  unsigned short length = (unsigned short) (log10((float) rudeMessage)) + 1;
   return length;
 }
 
@@ -45,35 +61,32 @@ int getState(unsigned short pin) {
 }
 
 void doAction(unsigned short id, unsigned short action) {
-  if( action == 0 ) {
-    digitalWrite(id, HIGH);
-  } else {
-    digitalWrite(id, LOW);
-  }
+  printf("Sending action %d to port %d\n", action, id);
+  digitalWrite(id, action == 0 ? HIGH : LOW);
 }
 
-void sendCallback(unsigned short callback){
+void sendCallback(unsigned short callback) {
   // First, stop listening so we can talk
   radio.stopListening();
 
   // Send the final one back.
-  radio.write( &callback, sizeof(unsigned short) );
+  radio.write(&callback, sizeof(unsigned short));
   printf("Sent response.\n\r");
 
   // Now, resume listening so we catch the next packets.
   radio.startListening();
 }
 
-void performAction(unsigned short rawMessage){
+void performAction(unsigned short rawMessage) {
   unsigned short action, id, length, callback;
   char * castedMessage;
-  
+
   length = getLength(rawMessage);
   castedMessage = convertNumberIntoArray(rawMessage, length);
   action = getMessage(castedMessage);
   id = getId(castedMessage, length);
 
-  if (action == 0 || action ==1) {
+  if (action == 0 || action == 1) {
     callback = action;
     doAction(id, action);
   } else if(action == 2) {
@@ -85,18 +98,25 @@ void performAction(unsigned short rawMessage){
 void setup(void) {
   // Print preamble
   Serial.begin(57600);
-  pinMode(relay, OUTPUT);
-  digitalWrite(relay, HIGH);
+  pinMode(PIN_LIGHTS, OUTPUT);
+  pinMode(PIN_WATER_ENGINE, OUTPUT);
+  pinMode(PIN_MAIN_DOOR, OUTPUT);
+
+  digitalWrite(PIN_LIGHTS, LOW);
+  digitalWrite(PIN_WATER_ENGINE, LOW);
+  digitalWrite(PIN_MAIN_DOOR, LOW);
   printf_begin();
+
   printf("\nRemote Switch Arduino\n\r");
 
   // Setup and configure rf radio
   radio.begin();
-  //radio.setAutoAck(1);                    // Ensure autoACK is enabled
-  radio.setRetries(15,15);
+  //radio.setAutoAck(1);                    
+  // Ensure autoACK is enabled
+  radio.setRetries(15, 15);
 
   radio.openWritingPipe(pipes[1]);
-  radio.openReadingPipe(1,pipes[0]);
+  radio.openReadingPipe(1, pipes[0]);
   radio.startListening();
   radio.printDetails();
 }
@@ -110,15 +130,15 @@ void loop(void) {
     //char * new;
     unsigned short rawMessage; 
     done = false;
+
     while (radio.available()) {
       // Fetch the payload, and see if this was the last one.
-      radio.read( &rawMessage, sizeof(unsigned long) );
+      radio.read(&rawMessage, sizeof(unsigned long));
 
       // Spew it
-      printf("Got message %d...",rawMessage); 
+      printf("Got message %d...", rawMessage);
 
       performAction(rawMessage);
-
       delay(10);
     }     
   }
